@@ -3,17 +3,17 @@ from gym import spaces
 import numpy as np
 from robobo_interface import SimulationRobobo
 
-COLLISION_THRESHOLD = 150  # IR sensor threshold for collision
+COLLISION_THRESHOLD = 100  # IR sensor threshold for collision
 
 class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
     def __init__(self):
         super(RoboboRLEnvironment, self).__init__()
         self.robot = SimulationRobobo()
 
-        # Define action space (3 discrete actions: forward, turn left, turn, right, stop)
-        self.action_space = spaces.Discrete(4)
+        # Define action space (3 discrete actions: forward, turn left, turn right)
+        self.action_space = spaces.Discrete(3)
 
-        # Define observation space (8 IR sensors with range 0 to 1000)
+        # Define observation space (5 IR sensors with range 0 to 1000)
         self.observation_space = spaces.Box(low=0, high=1000, shape=(5,), dtype=np.float32)
 
         self.previous_blocks_collected = 0
@@ -21,6 +21,8 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
 
         self.current_step = 0
         self.max_steps = 100  # Maximum number of steps per episode
+
+        self.prev_sensor_readings = [0, 0, 0, 0, 0]
 
 
     def reset(self):
@@ -54,10 +56,8 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
             self.robot.move_blocking(100, 100, 500)
         elif action == 1:  # Turn Left
             self.robot.move_blocking(-50, 50, 500)
-        elif action == 1:  # Turn Right
+        elif action == 2:  # Turn Right
             self.robot.move_blocking(50, -50, 500)
-        elif action == 2:  # Stop
-            self.robot.move_blocking(0, 0, 500)
 
         # Get the updated observation
         obs = self.get_observation()
@@ -65,6 +65,7 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
         # Calculate reward and check if the episode is done
         reward = self._calculate_reward(obs, action)
         done = self._check_done(obs)
+        self.prev_sensor_readings = obs
 
         # Update the current step
         self.current_step += 1
@@ -78,14 +79,26 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
         """
         reward = 0
 
+        avg_curr_sensor_reading = sum(obs) / len(obs)
+        avg_prev_sensor_reading = sum(self.prev_sensor_readings) / len(self.prev_sensor_readings)
+
+        # Penalize for moving closer to blocks
+        if avg_curr_sensor_reading < avg_prev_sensor_reading:
+            reward -= 1
+        # Reward for moving away from blocks
+        elif avg_curr_sensor_reading > avg_prev_sensor_reading:
+            reward += 1
+
+        
+
         # Penalize collisions (obstacle or wall)
         if any(sensor > COLLISION_THRESHOLD for sensor in obs):  # IR sensor threshold for collision
             reward -= 10
         # Reward for moving forward without collision
-        # elif action == 0:  # Move Forward
-        #     reward += 3
-        elif all(sensor < COLLISION_THRESHOLD for sensor in obs):
-            reward += 1  # Reward for moving safely
+        elif action == 0:  # Move Forward
+            reward += 3
+        # elif all(sensor < COLLISION_THRESHOLD for sensor in obs):
+        #     reward += 1  # Reward for moving safely
 
         return reward
 
