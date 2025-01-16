@@ -5,28 +5,30 @@ from data_files import RESULTS_DIR
 def train_rl_model():
     env = RoboboRLEnvironment()
     model = DQN(
-        "MlpPolicy", 
-        env, verbose=1, 
-        learning_rate=1e-3, 
-        buffer_size=10000, 
-        batch_size=32, 
-        exploration_initial_eps = 0.9,
-        exploration_fraction=1, 
-        exploration_final_eps=0.05
+        "MlpPolicy",
+        env, verbose=1,
+        learning_rate=1e-3,
+        buffer_size=10000,
+        learning_starts=200,
+        batch_size=32,
+        exploration_initial_eps = 0.6,
+        exploration_fraction=0.8,
+        exploration_final_eps=0.1,
+        target_update_interval=250
     )
     print("Training the model...")
-    model.learn(total_timesteps=100)
+    model.learn(total_timesteps=10000)
     model.save(f"{RESULTS_DIR}/robobo_dqn_model")
     print("Model saved to results/robobo_dqn_model.zip")
     env.close()
 
 def test_rl_model():
     env = RoboboRLEnvironment()
-    model = DQN.load("models/robobo_dqn_model")
+    model = DQN.load(f"{RESULTS_DIR}/robobo_dqn_model")
     print("Testing the model...")
     obs = env.reset()
     for _ in range(1000):
-        action, _ = model.predict(obs, deterministic=True)
+        action, _ = model.predict(obs, deterministic=False)
         obs, reward, done, _ = env.step(action)
         if done:
             print("Collision detected. Resetting environment...")
