@@ -2,8 +2,6 @@
 
 This repository contains the solution by Group 2 for the Learning Machines course assignments. The project is based on the `full_project_setup` template, with added and modified files that implement solutions for the course tasks.
 
----
-
 ## Key Features
 
 ### 1. Code for Assignment 0
@@ -14,17 +12,23 @@ This repository contains the solution by Group 2 for the Learning Machines cours
     - It then moves backward, turns right, and moves forward again for a short distance.
     - During the experiment, infrared sensor readings are continuously collected and stored in `.xlsx` files.
 
-- **Modified `__init__.py`**:
-  - Located in the same directory as `a0_actions.py`.
-  - Modified to execute the functionality implemented in `a0_actions.py`.
+### 2. Code for Assignment 1
+- **`a1_avoid_environment.py`**:
+  - Located in `catkin_ws/src/learning_machines/src/learning_machines/`.
+  - Implements the solution for Assignment 1:
+    - Train a robot to navigate an environment without collisions using the Deep Q-Network (DQN) reinforcement learning algorithm.
+    - The robot's goal is to maximize its travel distance by selecting actions that allow it to move forward towards the “safest” space, avoiding obstacles.
+    - The `arena_obstacles.ttt` scene is used to train the model.
+    - The `arena_obstacles_validation.ttt` scene is used to validate the trained model's performance.
+    - During all the experiments, infrared sensor readings, states, actions and rewards are continuously collected and stored in `.csv` files.
 
-### 2. Experiment Results for Assignment 0
+### 3. Experiment Results for all Assignments
 - **Results Directory**:
   - The `results/` directory contains the experimental outputs:
-    - `hardware_results/`: results from experiments conducted using hardware.
-    - `simulation_results/`: results from experiments conducted in simulation.
-  - Data is stored in `.xlsx` files, with each file corresponding to a specific experiment and including sensor readings, timestamps, and other relevant details.
+    - `a0_hardware_results/`: results from experiments conducted using hardware for assignment 0.
+    - `a0_simulation_results/`: results from experiments conducted in simulation for assignment 0.
+    - `a1_results/`: results from train, test, validation experiments conducted in simulation for assignment 1.
 
-### 3. Expanded Dependencies
+### 4. Expanded Dependencies
 - **`requirements.txt`**:
   - Contains all the necessary Python packages and libraries required to run the project.
