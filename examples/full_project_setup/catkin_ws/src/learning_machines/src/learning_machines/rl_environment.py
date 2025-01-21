@@ -6,30 +6,51 @@ from data_files import RESULTS_DIR
 import os
 import csv
 import cv2
-
-# Import nearest green object detection from our feature module
 from .process_images import detect_nearest_green_object
+from collections import deque
+import atexit
 
-COLLISION_THRESHOLD = 400
+# Define constants for actions
+MOVE_DURATION_MS = 300
+OSCILLATION_PENALTY = -10
+MAX_REWARD = 100  # Example value for normalization
+ALTERNATING_TURN_PENALTY = -15  # Penalty for repetitive alternating turns
+ALTERNATING_TURN_WINDOW = 4  # Number of recent actions to check for alternation
 
-class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
-    def __init__(self):
+# Define color thresholds for white detection in HSV
+WHITE_LOWER = np.array([0, 0, 200])
+WHITE_UPPER = np.array([180, 30, 255])
+
+class RoboboRLEnvironment(gym.Env):
+    """
+    Custom Gym environment for Robobo simulation with enhanced obstacle detection
+    based solely on white walls and penalization for repetitive alternating turns.
+    """
+
+    def __init__(self, save_images=False, max_steps=100):
         super(RoboboRLEnvironment, self).__init__()
         self.robot = SimulationRobobo()
+        self.save_images = save_images
+        self.max_steps = max_steps
 
         self.wheel_speed = {
-                "forward": (50, 50),
-                "backward": (-50, -50),
-                "left": (-30, 30),
-                "right": (30, -30)
-            }
-        self.thresholds = {"collision": 120, "danger": 80, "safe": 40}
+            "forward": (50, 50),
+            "backward": (-50, -50),
+            "left": (-30, 30),
+            "right": (30, -30)
+        }
+        self.thresholds = {"collision": 200, "danger": 80, "safe": 40}
 
+        # Assuming robot.read_irs() returns 8 sensors
+        self.num_ir_sensors = 8
         self.action_space = spaces.Discrete(4)
-        self.observation_space = spaces.Box(low=-1, high=1e6, shape=(12,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=np.array([-1]*12),
+            high=np.array([1e6]*12),
+            dtype=np.float32
+        )
 
         self.current_step = 0
-        self.max_steps = 100
         self.prev_food = 0
         self.prev_green_pixel_count = 0
 
@@ -38,14 +59,25 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
         self.csv_writer = csv.writer(self.log_file)
         header = [
             'step',
-            'sensor1', 'sensor2', 'sensor3', 'sensor4', 'sensor5',
+            'sensor1', 'sensor2', 'sensor3', 'sensor4', 'sensor5', 'sensor6', 'sensor7', 'sensor8',
             'green_pixel_count', 'nearest_area', 'centroid_x', 'centroid_y',
             'action', 'reward', 'distance_to_lower_center'
         ]
         self.csv_writer.writerow(header)
 
-        self.collision_delay_counter = 0  # Counter to track persistent collisions
-        self.collision_check_delay = 3   # Number of steps to confirm a wall collision
+        self.collision_delay_counter = 0
+        self.collision_check_delay = 3
+        self.action_history = deque(maxlen=ALTERNATING_TURN_WINDOW)
+
+        # Initialize last_features with default values
+        self.last_features = {
+            'green_pixel_count': 0,
+            'nearest_object_area': 0,
+            'nearest_object_centroid': (None, None),
+            'distance_to_lower_center': float('inf')
+        }
+
+        atexit.register(self.close)  # Ensure resources are cleaned up
 
     def reset(self):
         if hasattr(self.robot, 'is_running') and self.robot.is_running():
@@ -61,71 +93,69 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
         self.prev_green_pixel_count = 0
 
         obs = self.get_observation()
-        # Initialize distance tracking after first observation
         initial_distance = self.last_features['distance_to_lower_center']
-        self.prev_distance = initial_distance if initial_distance is not None else float('inf')
-        self.prev_area = np.log1p(self.last_features['nearest_object_area'] or 0)
+        self.prev_distance = initial_distance if isinstance(initial_distance, (int, float)) else float('inf')
+        self.prev_area = np.log1p(self.last_features.get('nearest_object_area', 0))
+        self.prev_potential = -self.prev_distance  # For potential-based reward shaping
         return obs
 
     def step(self, action):
         if action == 0:
-            self.robot.move_blocking(*self.wheel_speed["forward"], 300)
+            self.robot.move_blocking(*self.wheel_speed["forward"], MOVE_DURATION_MS)
         elif action == 1:
-            self.robot.move_blocking(*self.wheel_speed["left"], 300)
+            self.robot.move_blocking(*self.wheel_speed["left"], MOVE_DURATION_MS)
         elif action == 2:
-            self.robot.move_blocking(*self.wheel_speed["right"], 300)
+            self.robot.move_blocking(*self.wheel_speed["right"], MOVE_DURATION_MS)
         elif action == 3:
-            self.robot.move_blocking(*self.wheel_speed["backward"], 300)
+            self.robot.move_blocking(*self.wheel_speed["backward"], MOVE_DURATION_MS)
+        else:
+            raise ValueError(f"Invalid action: {action}")
 
         obs = self.get_observation()
         reward = self._calculate_reward(obs, action)
         done = self._check_done()
 
+        distance = self.last_features.get('distance_to_lower_center', float('inf'))
         log_row = (
             [self.current_step] +
             obs.tolist() +
-            [action, reward, self.last_features['distance_to_lower_center']]
+            [action, reward, distance]
         )
         if self.csv_writer:
             self.csv_writer.writerow(log_row)
 
         self.current_step += 1
         return obs, reward, done, {}
-    
+
     def _calculate_reward(self, obs, action):
         reward = 0
-
-        # Ensure action is an integer
-        action = int(action)
 
         # Reward from food collection
         current_food = self.robot.get_nr_food_collected()
         reward += 50 * (current_food - self.prev_food)
         self.prev_food = current_food
 
-        # Additional reward from change in nearest green object area
-        current_area = np.log1p(self.last_features['nearest_object_area'] or 0)
-        current_distance = self.last_features['distance_to_lower_center']
-        current_distance = current_distance if current_distance is not None else float('inf')
+        # Reward from distance change
+        current_area = np.log1p(self.last_features.get('nearest_object_area', 0))
+        current_distance = self.last_features.get('distance_to_lower_center', float('inf'))
+        current_distance = current_distance if current_distance else float('inf')
         distance_delta = self.prev_distance - current_distance
 
-        if not np.isfinite(distance_delta):
-            distance_delta = 0
         reward += 0.01 * distance_delta
-        self.prev_distance = current_distance
+        self.prev_distance = current_distance if isinstance(current_distance, (int, float)) else self.prev_distance
 
-        # Determine environment context
+        # Environment context based on white wall detection
         target_in_sight = current_area > 0
         stuck = all(sensor > self.thresholds["collision"] for sensor in obs[:5])
 
-        # Reward or penalize based on whether the target is in sight
+        # Reward or penalize based on target visibility
         if target_in_sight:
             reward += 10
-            if action == 0:  # Moving forward
-                reward += 5
-            elif action in [1, 2]:  # Turning
+            if action == 0:
+                reward += 10
+            elif action in [1, 2]:
                 reward += 2
-            elif action == 3:  # Reversing
+            elif action == 3:
                 reward -= 5
         else:
             reward -= 5
@@ -136,11 +166,11 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
             elif action == 3:
                 reward -= 2
 
-        # Penalize oscillatory behavior
-        if hasattr(self, 'last_action') and action != self.last_action:
-            if (self.last_action, action) in [(1, 2), (2, 1)]:  # Oscillating between left and right
-                reward -= 10
-        self.last_action = action
+        # Track action history for oscillation detection
+        self.action_history.append(action)
+        # Penalize oscillatory behavior: repeated alternating turns
+        if self._is_repeated_alternating_turns():
+            reward -= 10  # Apply negative penalty
 
         # Reward escaping from walls
         if stuck:
@@ -154,40 +184,86 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
         if action == 3 and not stuck:
             reward -= 1
 
-        print("REWARD:", reward, "Target in sight:", target_in_sight, "Distance to lower center:", current_distance)
-        return reward
-    
-    def _check_done(self):
-        # Read current IR sensor readings
-        ir_sensors = self.get_observation()[:5]
-        
-        # Check if any sensor indicates a collision
-        collision_detected = any(sensor > COLLISION_THRESHOLD for sensor in ir_sensors)
+        # Potential-based reward shaping
+        potential = -current_distance if isinstance(current_distance, (int, float)) else -self.prev_distance
+        shaped_reward = reward + (potential - self.prev_potential)
+        self.prev_potential = potential
 
-        # Check if a green block was collected
+        # Normalize reward
+        shaped_reward = np.clip(shaped_reward / MAX_REWARD, -1, 1)
+
+        print(f"REWARD: {shaped_reward}, Target in sight: {target_in_sight}, Distance: {current_distance}")
+        return shaped_reward
+
+    def _is_obstacle_detected(self):
+        """
+        Determine if a white wall is detected as an obstacle based on image processing.
+        """
+        # Detect white areas in the image to identify white walls
+        image = self.robot.read_image_front()
+        if image is not None:
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, WHITE_LOWER, WHITE_UPPER)
+            white_pixel_count = cv2.countNonZero(mask)
+            print(white_pixel_count)
+            # Define a threshold for white pixel count to consider as obstacle
+            WHITE_OBSTACLE_THRESHOLD = 4000
+            if white_pixel_count > WHITE_OBSTACLE_THRESHOLD:
+                return True
+        return False
+
+    def _is_repeated_alternating_turns(self):
+        """
+        Check if the action history contains repeated alternating turns (Left ↔ Right).
+        """
+        if len(self.action_history) < ALTERNATING_TURN_WINDOW:
+            return False
+
+        # Extract the last ALTERNATING_TURN_WINDOW actions
+        recent_actions = list(self.action_history)[-ALTERNATING_TURN_WINDOW:]
+
+        # Define the alternating pattern: Left, Right, Left, Right or Right, Left, Right, Left
+        pattern1 = [1, 2] * (ALTERNATING_TURN_WINDOW // 2)
+        pattern2 = [2, 1] * (ALTERNATING_TURN_WINDOW // 2)
+
+        if recent_actions == pattern1 or recent_actions == pattern2:
+            return True
+        return False
+
+    def _check_done(self):
+        ir_sensors = self.get_observation()[:5]
+
+        white_wall_detected = self._is_obstacle_detected()
+        collision_detected = any(sensor > self.thresholds['collision'] for sensor in ir_sensors)
+
         current_food = self.robot.get_nr_food_collected()
         green_block_collision = current_food > self.prev_food
         if green_block_collision:
-            self.prev_food = current_food  # Update food count
-            self.collision_delay_counter = 0  # Reset the counter on green block collision
-            return False  # Do not reset for green block collisions
+            self.prev_food = current_food
+            self.collision_delay_counter = 0
+            return False  # Do not terminate
 
-        # Check if collected food equals 7
         if current_food >= 7:
-            return True  # Reset simulation when 7 or more green blocks are collected
+            return True  # Terminate
 
         if collision_detected:
-            # Increment the delay counter if a collision is detected
             self.collision_delay_counter += 1
         else:
-            # Reset the delay counter if no collision is detected
             self.collision_delay_counter = 0
 
-        # Confirm wall collision if the delay counter exceeds the threshold
-        return self.collision_delay_counter >= self.collision_check_delay
+        if self.collision_delay_counter >= self.collision_check_delay:
+            return True  # Terminate
+
+        if self.current_step >= self.max_steps:
+            return True  # Terminate
+
+        return False
 
     def get_observation(self):
         ir_sensors = self.robot.read_irs()
+        if ir_sensors is None or len(ir_sensors) < self.num_ir_sensors:
+            ir_sensors = [0.0] * self.num_ir_sensors  # Default values or handle accordingly
+
         image = self.robot.read_image_front()
         green_pixel_count = 0
         nearest_area = 0
@@ -199,175 +275,40 @@ class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
                 image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
             features = detect_nearest_green_object(image)
             self.last_features = features
-            green_pixel_count = features['green_pixel_count']
-            nearest_area = features['nearest_object_area']
-            cx, cy = features['nearest_object_centroid']
-            if cx is not None and cy is not None:
-                centroid_x = cx
-                centroid_y = cy
+            green_pixel_count = features.get('green_pixel_count', 0)
+            nearest_area = features.get('nearest_object_area', 0)
+            centroid = features.get('nearest_object_centroid', (None, None))
+            cx, cy = centroid
+            centroid_x = cx if cx is not None else -1
+            centroid_y = cy if cy is not None else -1
 
-            if self.current_step % 10 == 0:
+            # Ensure 'distance_to_lower_center' is a float
+            distance = features.get('distance_to_lower_center')
+            if distance is None:
+                distance = 1000
+            self.last_features['distance_to_lower_center'] = distance
+
+            if self.save_images and self.current_step % 10 == 0:
                 image_path = os.path.join(RESULTS_DIR, f"step_{self.current_step}.jpg")
-                # cv2.imwrite(image_path, image)
+                cv2.imwrite(image_path, image)
+        else:
+            # Handle missing image data
+            self.last_features = {
+                'green_pixel_count': 0,
+                'nearest_object_area': 0,
+                'nearest_object_centroid': (None, None),
+                'distance_to_lower_center': float('inf')
+            }
 
-        front_sensors = [ir_sensors[i] for i in [2, 3, 4, 5, 7]]
-        # extended_observation = front_sensors + [green_pixel_count, nearest_area, centroid_x, centroid_y]
         extended_observation = ir_sensors + [green_pixel_count, nearest_area, centroid_x, centroid_y]
         return np.array(extended_observation, dtype=np.float32)
 
     def close(self):
         if self.log_file:
+            # Flush remaining logs
+            self.log_file.flush()
             self.log_file.close()
             self.log_file = None
             self.csv_writer = None
         if hasattr(self.robot, 'is_running') and self.robot.is_running():
             self.robot.stop_simulation()
-
-
-
-# TASK 1
-
-# COLLISION_THRESHOLD = 120
-
-# class RoboboRLEnvironment(gym.Env):  # Subclass from gym.Env
-#     def __init__(self):
-#         super(RoboboRLEnvironment, self).__init__()
-#         self.robot = SimulationRobobo()
-
-#         # Define action space (3 discrete actions: forward, turn left, turn right)
-#         self.action_space = spaces.Discrete(3)
-
-#         # Define observation space (5 IR sensors)
-#         self.observation_space = spaces.Box(
-#             low=0, high=1000, shape=(5,), dtype=np.float32
-#         )
-
-#         self.current_step = 0
-#         self.max_steps = 100
-#         self.prev_sensor_readings = np.zeros(5)
-#         self.prev_action = None
-
-#     def reset(self):
-#         """Reset the environment"""
-#         if hasattr(self.robot, 'is_running') and self.robot.is_running():
-#             self.robot.stop_simulation()
-
-#         if hasattr(self.robot, 'play_simulation'):
-#             self.robot.play_simulation()
-
-#         self.current_step = 0
-
-#         # Get initial observation
-#         obs = self.get_observation()
-#         self.prev_sensor_readings = obs
-#         return obs
-
-#     def step(self, action):
-#         """Execute action and return new state"""
-#         # Execute action
-#         if action == 0:  # Move Forward
-#             self.robot.move_blocking(40, 40, 300)
-#         elif action == 1:  # Turn Left
-#             self.robot.move_blocking(-20, 20, 300)
-#         else:  # Turn Right
-#             self.robot.move_blocking(20, -20, 300)
-
-#         # Get new observation
-#         obs = self.get_observation()
-
-#         # Calculate reward
-#         reward = self._calculate_reward(obs, action)
-
-#         # Check if episode is done
-#         done = self._check_done(obs)
-
-#         # Update previous readings
-#         self.prev_sensor_readings = obs
-#         self.current_step += 1
-
-#         return obs, reward, done, {}
-
-#     def _calculate_reward(self, obs, action):
-#         """Calculate the reward"""
-#         reward = 0
-
-#         # Define thresholds
-#         DANGER_THRESHOLD = 80  # Getting very close to obstacle
-#         SAFE_THRESHOLD = 40  # Good distance for navigation
-
-#         # Heavy penalty for potential collisions (readings > 100)
-#         if any(sensor > 100 for sensor in obs):
-#             reward -= 10
-#             return reward  # Immediate return for collision
-
-#         # Penalty for getting too close to obstacles
-#         if any(sensor > DANGER_THRESHOLD for sensor in obs):
-#             reward -= 5
-
-#         # Reward for moving forward while maintaining safe distance
-#         if action == 0:  # Forward action
-#             # Check if path ahead is relatively clear
-#             if all(sensor < SAFE_THRESHOLD for sensor in obs):
-#                 reward += 5  # Good forward movement
-#             else:
-#                 reward += 0.5  # Smaller reward if moving forward in tighter spaces
-
-#         # Handling turning actions with conditional rewards
-#         elif action in [1, 2]:  # Turning actions
-#             # Check if there's an obstacle ahead (center sensors likely indicating front view)
-#             front_obstacle = obs[1] > DANGER_THRESHOLD or obs[2] > DANGER_THRESHOLD or obs[3] > DANGER_THRESHOLD
-
-#             if front_obstacle:
-#                 # Get readings from sensors (LL, L, C, R, RR)
-#                 left_side_danger = max(obs[0], obs[1])  # LL and L sensors
-#                 right_side_danger = max(obs[3], obs[4])  # R and RR sensors
-
-#                 # Reward turning if it directs the robot away from the greater danger
-#                 if action == 1 and right_side_danger > left_side_danger:
-#                     reward += 2
-#                 elif action == 2 and left_side_danger > right_side_danger:
-#                     reward += 2
-#                 else:
-#                     reward -= 0.5  # Small penalty if turning in a suboptimal direction
-#             else:
-#                 # Penalize turning when no immediate obstacle is detected ahead
-#                 reward -= 1
-
-#         # Reward for maintaining good exploration distance (safe distance from all obstacles)
-#         if all(sensor < SAFE_THRESHOLD for sensor in obs):
-#             reward += 2
-
-#         # Encourage movement by penalizing staying still (NOT SURE ABOUT THS ONE)
-#         if np.array_equal(self.prev_sensor_readings, obs):
-#             reward -= 1
-
-#         return reward
-
-#     def _check_done(self, obs):
-#         """Check if episode should end"""
-#         # End if collision
-#         if any(sensor > COLLISION_THRESHOLD for sensor in obs):
-#             return True
-
-#         # End if max steps reached
-#         # if self.current_step >= self.max_steps:
-#         #     return True
-
-#         # End if simulation stopped
-#         if hasattr(self.robot, 'is_stopped') and self.robot.is_stopped():
-#             return True
-
-#         return False
-
-#     def get_observation(self):
-#         """Get current observation"""
-#         ir_sensors = self.robot.read_irs()
-#         # Use front sensors
-#         front_sensors = [ir_sensors[i] for i in [2, 3, 4, 5, 7]] # using 5 front sensors
-#         return np.array(front_sensors, dtype=np.float32)
-
-#     def close(self):
-#         """Clean up"""
-#         if hasattr(self.robot, 'is_running') and self.robot.is_running():
-#             self.robot.stop_simulation()
-

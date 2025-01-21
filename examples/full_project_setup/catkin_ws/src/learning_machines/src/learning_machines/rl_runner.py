@@ -3,7 +3,7 @@ from .rl_environment import RoboboRLEnvironment
 from data_files import RESULTS_DIR
 
 def train_rl_model():
-    env = RoboboRLEnvironment()
+    env = RoboboRLEnvironment(max_steps=150)
     model = DQN(
         "MlpPolicy",
         env,
@@ -28,7 +28,7 @@ def train_rl_model():
         env.close()
 
 def test_rl_model():
-    env = RoboboRLEnvironment()
+    env = RoboboRLEnvironment(max_steps=200)
     model = DQN.load(f"{RESULTS_DIR}/models/task2")
     print("Testing the model...")
     obs = env.reset()

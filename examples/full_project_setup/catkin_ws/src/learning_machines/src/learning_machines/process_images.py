@@ -55,7 +55,7 @@ def detect_nearest_green_object(image, area_threshold=10000):
 
 
 if __name__ == "__main__":
-    RESULTS_DIR = r"C:\Users\Thimo\Documents\learning_machines_robobo\examples\full_project_setup\results"
+    RESULTS_DIR = "./results"
 
     def process_images_in_batches(batch_size=5, scale_factor=0.5):
         image_files = sorted(f for f in os.listdir(RESULTS_DIR) if f.startswith("step_") and f.endswith(".jpg"))
