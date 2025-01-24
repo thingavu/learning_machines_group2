@@ -27,8 +27,7 @@ This repository contains the solution by Group 2 for the Learning Machines cours
   - Located in `catkin_ws/src/learning_machines/src/learning_machines/`.
   - Implements the solution for Assignment 2:
     - Train a robot to find, approach and touch (eat) green items (food) using the Deep Q-Network (DQN) reinforcement learning algorithm.
-    - The `arena_approach.ttt` scene is used to train the model.
-    - The `arena_approach_validation.ttt` scene, which randomizes the location of items, is used to validate the trained model's performance.
+    - The `arena_approach_random.ttt` scene, which randomizes the location of items, was used.
     - During all the experiments, infrared sensor readings, states, actions and rewards are continuously collected and stored in `.csv` files.
 - **`process_images.py`**:
   - Located in `catkin_ws/src/learning_machines/src/learning_machines/`.
@@ -40,7 +39,7 @@ This repository contains the solution by Group 2 for the Learning Machines cours
     - `a0_hardware_results/`: results from experiments conducted using hardware for assignment 0.
     - `a0_simulation_results/`: results from experiments conducted in simulation for assignment 0.
     - `a1_results/`: results from train, test, validation experiments conducted in simulation for assignment 1, along with the trained model.
-    - `a2_results/`: results from train, test, validation experiments conducted in simulation for assignment 2, along with the trained model.
+    - `a2_results/`: results from train and validation experiments conducted in simulation for assignment 2, along with the trained model.
 
 ### 5. Expanded Dependencies
 - **`requirements.txt`**:
