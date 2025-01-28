@@ -15,7 +15,7 @@ from .process_images import detect_nearest_green_object
 
 TIMESTEPS = 5000
 N_TESTS = 1
-TEST_MODE = "test"  # "validation"
+TEST_MODE = "test"  # "test"
 
 
 class RoboboItemCollectionEnvironment(gym.Env):

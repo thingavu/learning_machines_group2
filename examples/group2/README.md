@@ -19,7 +19,7 @@ This repository contains the solution by Group 2 for the Learning Machines cours
     - Train a robot to navigate an environment without collisions using the Deep Q-Network (DQN) reinforcement learning algorithm.
     - The robot's goal is to maximize its travel distance by selecting actions that allow it to move forward towards the “safest” space, avoiding obstacles.
     - The `arena_obstacles.ttt` scene is used to train the model.
-    - The `arena_obstacles_validation.ttt` scene is used to validate the trained model's performance.
+    - The `test_arena_obstacles.ttt` scene is used to test the trained model's performance.
     - During all the experiments, infrared sensor readings, states, actions and rewards are continuously collected and stored in `.csv` files.
 
 ### 3. Code for Assignment 2
@@ -38,8 +38,8 @@ This repository contains the solution by Group 2 for the Learning Machines cours
   - The `results/` directory contains the experimental outputs:
     - `a0_hardware_results/`: results from experiments conducted using hardware for assignment 0.
     - `a0_simulation_results/`: results from experiments conducted in simulation for assignment 0.
-    - `a1_results/`: results from train, test, validation experiments conducted in simulation for assignment 1, along with the trained model.
-    - `a2_results/`: results from train and validation experiments conducted in simulation for assignment 2, along with the trained model.
+    - `a1_results/`: results from train and test experiments conducted in simulation for assignment 1, along with the trained model.
+    - `a2_results/`: results from train and test experiments conducted in simulation for assignment 2, along with the trained model.
 
 ### 5. Expanded Dependencies
 - **`requirements.txt`**:
