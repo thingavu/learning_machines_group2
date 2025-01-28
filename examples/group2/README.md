@@ -23,13 +23,13 @@ This repository contains the solution by Group 2 for the Learning Machines cours
     - During all the experiments, infrared sensor readings, states, actions and rewards are continuously collected and stored in `.csv` files.
 
 ### 3. Code for Assignment 2
-- **`a2_food.py`**:
+- **`a2_runner.py` and `a2_environment.py`**:
   - Located in `catkin_ws/src/learning_machines/src/learning_machines/`.
   - Implements the solution for Assignment 2:
     - Train a robot to find, approach and touch (eat) green items (food) using the Deep Q-Network (DQN) reinforcement learning algorithm.
     - The `arena_approach_random.ttt` scene, which randomizes the location of items, was used.
     - During all the experiments, infrared sensor readings, states, actions and rewards are continuously collected and stored in `.csv` files.
-- **`process_images.py`**:
+- **`a2_process_images.py`**:
   - Located in `catkin_ws/src/learning_machines/src/learning_machines/`.
   - Provides functionality for detecting green objects in images, calculating their properties, and annotating the images for debugging and analysis.
 

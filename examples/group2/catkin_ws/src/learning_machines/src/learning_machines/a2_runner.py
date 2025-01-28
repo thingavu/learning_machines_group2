@@ -1,5 +1,5 @@
 from stable_baselines3 import DQN
-from .rl_environment import RoboboRLEnvironment
+from .a2_environment import RoboboRLEnvironment
 from data_files import RESULTS_DIR
 
 def train_rl_model():

@@ -9,7 +9,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 # Import nearest green object detection from our feature module
-from .process_images import detect_nearest_green_object
+from .a2_process_images import detect_nearest_green_object
 
 COLLISION_THRESHOLD = 200
 
