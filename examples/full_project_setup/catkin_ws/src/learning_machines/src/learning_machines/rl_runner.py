@@ -8,7 +8,7 @@ def train_rl_model():
         "MlpPolicy",
         env,
         verbose=1,
-        learning_rate=0.01,
+        learning_rate=0.001,
         buffer_size=10000,
         learning_starts=200,
         batch_size=32,
@@ -20,7 +20,7 @@ def train_rl_model():
     try:
         print("Training the model...")
         model.learn(total_timesteps=10000)
-        model.save(f"{RESULTS_DIR}/models/task2")
+        model.save(f"{RESULTS_DIR}/models/task2_ver2")
         print("Model saved to results/models/task2.zip")
     except Exception as e:
         print(f"Error during training: {e}")

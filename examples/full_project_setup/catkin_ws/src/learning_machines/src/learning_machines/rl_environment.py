@@ -54,7 +54,7 @@ class RoboboRLEnvironment(gym.Env):
         self.prev_food = 0
         self.prev_green_pixel_count = 0
 
-        log_path = os.path.join(RESULTS_DIR, 'robot_item_collection_log.csv')
+        log_path = os.path.join(RESULTS_DIR, 'robot_item_collection_log_ver2.csv')
         self.log_file = open(log_path, 'w', newline='')
         self.csv_writer = csv.writer(self.log_file)
         header = [
@@ -66,7 +66,7 @@ class RoboboRLEnvironment(gym.Env):
         self.csv_writer.writerow(header)
 
         self.collision_delay_counter = 0
-        self.collision_check_delay = 3
+        self.collision_check_delay = 5
         self.action_history = deque(maxlen=ALTERNATING_TURN_WINDOW)
 
         # Initialize last_features with default values
@@ -97,6 +97,7 @@ class RoboboRLEnvironment(gym.Env):
         self.prev_distance = initial_distance if isinstance(initial_distance, (int, float)) else float('inf')
         self.prev_area = np.log1p(self.last_features.get('nearest_object_area', 0))
         self.prev_potential = -self.prev_distance  # For potential-based reward shaping
+        self.prev_target_in_sight = self.prev_area > 0
         return obs
 
     def step(self, action):
@@ -132,7 +133,10 @@ class RoboboRLEnvironment(gym.Env):
 
         # Reward from food collection
         current_food = self.robot.get_nr_food_collected()
-        reward += 50 * (current_food - self.prev_food)
+        if len(self.action_history) > 0:
+            if self.action_history[-1] != 3:
+                reward += 50 * (current_food - self.prev_food) if (self.prev_target_in_sight) else 10
+
         self.prev_food = current_food
 
         # Reward from distance change
@@ -146,23 +150,22 @@ class RoboboRLEnvironment(gym.Env):
 
         # Environment context based on white wall detection
         target_in_sight = current_area > 0
-        stuck = all(sensor > self.thresholds["collision"] for sensor in obs[:5])
+        ir_sensors = self.get_observation()[1:9]
+        stuck = all(sensor > self.thresholds["collision"] for sensor in ir_sensors)
 
         # Reward or penalize based on target visibility
         if target_in_sight:
-            reward += 10
+            reward += 20
             if action == 0:
                 reward += 10
             elif action in [1, 2]:
-                reward += 2
+                reward += 3
             elif action == 3:
                 reward -= 5
         else:
             reward -= 5
-            if action in [1, 2]:
-                reward += 3
-            elif action == 0:
-                reward -= 5
+            if action in [0, 1, 2]:
+                reward += 2
             elif action == 3:
                 reward -= 2
 
@@ -222,18 +225,21 @@ class RoboboRLEnvironment(gym.Env):
         # Extract the last ALTERNATING_TURN_WINDOW actions
         recent_actions = list(self.action_history)[-ALTERNATING_TURN_WINDOW:]
 
-        # Define the alternating pattern: Left, Right, Left, Right or Right, Left, Right, Left
+        # Define the alternating pattern: Left, Right, Left, Right or Right, Left, Right, Left also back and front
         pattern1 = [1, 2] * (ALTERNATING_TURN_WINDOW // 2)
         pattern2 = [2, 1] * (ALTERNATING_TURN_WINDOW // 2)
+        pattern3 = [0, 3] * (ALTERNATING_TURN_WINDOW // 2)
+        pattern4 = [3, 0] * (ALTERNATING_TURN_WINDOW // 2)
 
-        if recent_actions == pattern1 or recent_actions == pattern2:
+        if recent_actions == pattern1 or recent_actions == pattern2 or recent_actions == pattern3 or recent_actions == pattern4:
             return True
         return False
 
     def _check_done(self):
-        ir_sensors = self.get_observation()[:5]
+        ir_sensors = self.get_observation()
+        ir_sensors = [ir_sensors[x] for x in range(len(ir_sensors)) if x in [2, 3, 4, 5, 7]]
 
-        white_wall_detected = self._is_obstacle_detected()
+        # white_wall_detected = self._is_obstacle_detected()
         collision_detected = any(sensor > self.thresholds['collision'] for sensor in ir_sensors)
 
         current_food = self.robot.get_nr_food_collected()
@@ -246,7 +252,7 @@ class RoboboRLEnvironment(gym.Env):
         if current_food >= 7:
             return True  # Terminate
 
-        if collision_detected:
+        if collision_detected and not green_block_collision:
             self.collision_delay_counter += 1
         else:
             self.collision_delay_counter = 0
