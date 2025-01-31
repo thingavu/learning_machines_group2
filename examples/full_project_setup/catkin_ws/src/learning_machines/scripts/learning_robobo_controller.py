@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import sys
-from learning_machines import run_all_actions, train_rl_model, test_rl_model
+from learning_machines import train_rl_model, test_rl_model, test_hardware
 from robobo_interface import HardwareRobobo
 
 if __name__ == "__main__":
@@ -12,8 +12,7 @@ if __name__ == "__main__":
         )
     
     if sys.argv[1] == "--hardware":
-        rob = HardwareRobobo(camera=True)
-        run_all_actions(rob)
+        test_hardware()
 
     elif sys.argv[1] == "--simulation":
         if len(sys.argv) < 3:
